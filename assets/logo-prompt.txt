@@ -1,0 +1,10 @@
+Generated using the built-in image generation tool with a transparent background.
+Final prompt:
+
+Use case: logo-brand
+Asset type: finished PNG logomark for the bclippy Rust developer tool and GitHub README.
+Primary request: create one distinctive, friendly, professionally designed mascot logo combining a small Rust-inspired crab with a simple paperclip motif. The compact crab has curly-brace-shaped claws and a clean paperclip loop at its center, subtly suggesting readable code and breathing room.
+Style: bold flat vector-like illustration, a coherent simple silhouette, crisp clean curves, restrained detail, warm rust-orange with dark ink details and small pale highlights. Friendly and technically minded, readable at small icon sizes.
+Composition: a single centered square logomark, generous transparent margin, balanced and symmetrical, no surrounding badge or presentation board.
+Text: none. The name bclippy will be typeset separately in the README.
+Constraints: true transparent background, one final mark only, no mockups, no gradients, no shadows, no watermarks, no extra symbols or text.
