@@ -36,6 +36,11 @@ impl FormatCommand {
         for argument in arguments {
             if !literal_paths && argument == "--" {
                 literal_paths = true;
+            } else if !literal_paths && (argument == "--check" || argument == "--fix") {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    "choose either --check or --fix; the operations cannot be combined or repeated",
+                ));
             } else if !literal_paths && argument.as_encoded_bytes().starts_with(b"-") {
                 return Err(io::Error::new(
                     io::ErrorKind::InvalidInput,

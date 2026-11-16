@@ -11,7 +11,7 @@ fn wrapper_without_cargo() -> Command {
 
 #[test]
 fn wrapper_help_succeeds_without_cargo() {
-    let output = wrapper_without_cargo().args(["bclippy", "--bclippy-help"]).output().unwrap();
+    let output = wrapper_without_cargo().args(["bclippy", "--help"]).output().unwrap();
 
     assert!(output.status.success());
     assert!(String::from_utf8(output.stdout).unwrap().contains("Usage: cargo bclippy"));
@@ -20,7 +20,7 @@ fn wrapper_help_succeeds_without_cargo() {
 
 #[test]
 fn wrapper_version_succeeds_without_cargo() {
-    let output = wrapper_without_cargo().arg("--bclippy-version").output().unwrap();
+    let output = wrapper_without_cargo().arg("--version").output().unwrap();
 
     assert!(output.status.success());
     assert_eq!(output.stdout, format!("bclippy {}\n", env!("CARGO_PKG_VERSION")).as_bytes());
@@ -134,13 +134,13 @@ mod unix {
     }
 
     #[test]
-    fn upstream_help_and_version_flags_are_forwarded() {
+    fn flags_after_separator_are_forwarded_without_interception() {
         let fixture = CargoFixture::new("printf '%s\\000' \"$@\"");
 
-        for argument in ["--help", "-h", "--version", "-V"] {
-            let output = fixture.command().arg(argument).output().unwrap();
+        for argument in ["--help", "-h", "--version", "-V", "--check", "--fix"] {
+            let output = fixture.command().args(["--", argument]).output().unwrap();
 
-            assert_eq!(output.stdout, format!("clippy\0{argument}\0").as_bytes());
+            assert_eq!(output.stdout, format!("clippy\0--\0{argument}\0").as_bytes());
         }
     }
 
@@ -225,7 +225,7 @@ mod unix {
         let source = "fn example() {\n    before();\n    if ready {\n        work();\n    }\n    after();\n}\n";
         let path = fixture.directory.join("example.rs");
         fs::write(&path, source).unwrap();
-        let output = fixture.command().args(["--bclippy-check", "example.rs"]).output().unwrap();
+        let output = fixture.command().args(["--check", "example.rs"]).output().unwrap();
 
         assert_eq!(output.status.code(), Some(1));
         assert!(String::from_utf8(output.stderr).unwrap().contains("[bclippy::block_padding]"));
@@ -238,7 +238,7 @@ mod unix {
         let source = "fn example() {\n    before();\n    while ready {\n        work();\n    }\n    after();\n}\n";
         let path = fixture.directory.join("example.rs");
         fs::write(&path, source).unwrap();
-        let output = fixture.command().args(["bclippy", "--bclippy-fix", "example.rs"]).output().unwrap();
+        let output = fixture.command().args(["bclippy", "--fix", "example.rs"]).output().unwrap();
 
         assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
         assert_eq!(
@@ -247,14 +247,7 @@ mod unix {
                 .replace("    while ready", "\n    while ready")
                 .replace("    after();", "\n    after();")
         );
-        assert!(
-            fixture
-                .command()
-                .args(["--bclippy-check", "example.rs"])
-                .status()
-                .unwrap()
-                .success()
-        );
+        assert!(fixture.command().args(["--check", "example.rs"]).status().unwrap().success());
     }
 
     #[test]
@@ -264,7 +257,7 @@ mod unix {
         let path = fixture.directory.join("a_valid.rs");
         fs::write(&path, source).unwrap();
         fs::write(fixture.directory.join("z_invalid.rs"), "fn incomplete( {").unwrap();
-        let output = fixture.command().arg("--bclippy-fix").output().unwrap();
+        let output = fixture.command().arg("--fix").output().unwrap();
 
         assert!(!output.status.success());
         assert!(String::from_utf8(output.stderr).unwrap().contains("z_invalid.rs"));
@@ -283,7 +276,7 @@ mod unix {
         }
 
         std::os::unix::fs::symlink("vendor/invalid.rs", fixture.directory.join("linked.rs")).unwrap();
-        let output = fixture.command().arg("--bclippy-check").output().unwrap();
+        let output = fixture.command().arg("--check").output().unwrap();
 
         assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
         assert!(String::from_utf8(output.stderr).unwrap().contains("checked 1 Rust files"));
@@ -292,9 +285,25 @@ mod unix {
     #[test]
     fn empty_source_selection_is_an_error() {
         let fixture = CargoFixture::new("exit 99");
-        let output = fixture.command().arg("--bclippy-check").output().unwrap();
+        let output = fixture.command().arg("--check").output().unwrap();
 
         assert!(!output.status.success());
         assert!(String::from_utf8(output.stderr).unwrap().contains("no Rust source files"));
+    }
+
+    #[test]
+    fn conflicting_operations_fail_without_writing_source() {
+        let fixture = CargoFixture::new("exit 99");
+        let source = "fn example() {\n    before();\n    if ready {\n        work();\n    }\n}\n";
+        let path = fixture.directory.join("example.rs");
+        fs::write(&path, source).unwrap();
+
+        for arguments in [["--check", "--fix", "example.rs"], ["--fix", "--check", "example.rs"]] {
+            let output = fixture.command().args(arguments).output().unwrap();
+
+            assert!(!output.status.success());
+            assert!(String::from_utf8(output.stderr).unwrap().contains("choose either --check or --fix"));
+            assert_eq!(fs::read_to_string(&path).unwrap(), source);
+        }
     }
 }

@@ -39,19 +39,17 @@ cargo bclippy --message-format=json
 ```
 
 Cargo options go before `--`; compiler and lint options go after it, just as
-with `cargo clippy`. Standard help and version flags are forwarded to Clippy:
+with `cargo clippy`. This package installs one executable, `cargo-bclippy`,
+which provides both formatting operations through flags:
 
 ```sh
 cargo bclippy --help
 cargo bclippy --version
 ```
 
-To display bclippy's own help or version, use these flags on their own:
-
-```sh
-cargo bclippy --bclippy-help
-cargo bclippy --bclippy-version
-```
+`--help` describes the check/fix options; `--version` displays bclippy's version.
+`--check` and `--fix` are mutually exclusive. Other invocations delegate to
+upstream Clippy. Run `cargo clippy --fix` for Clippy's own compiler suggestions.
 
 Rustup toolchain selection works through Cargo:
 
@@ -86,10 +84,10 @@ fn read() {
 Check without writing, or apply fixes:
 
 ```sh
-cargo bclippy --bclippy-check
-cargo bclippy --bclippy-fix
-cargo bclippy --bclippy-fix crates/example/src/main.rs
-cargo bclippy --bclippy-check src tests
+cargo bclippy --check
+cargo bclippy --fix
+cargo bclippy --fix crates/example/src/main.rs
+cargo bclippy --check src tests
 ```
 
 These modes run only the source rule; they do not start Clippy. Use them as a
@@ -147,7 +145,7 @@ Exercise the wrapper against this repository without installing it:
 ```sh
 cargo build --locked
 cargo run --locked -- --bclippy-help
-cargo run --locked -- --bclippy-check src tests
+cargo run --locked -- --check src tests
 cargo run --locked -- --workspace --all-targets --all-features --locked -- -D warnings
 ```
 
