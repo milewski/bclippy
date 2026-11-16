@@ -1,4 +1,6 @@
-//! Cargo subcommand that delegates to the selected toolchain's upstream Clippy.
+//! Cargo subcommand combining upstream Clippy with compiler-independent style rules.
+
+mod formatting;
 
 use std::env;
 use std::ffi::OsString;
@@ -6,10 +8,13 @@ use std::io::{self, Write};
 use std::path::Path;
 use std::process::{self, Command};
 
+use formatting::{FormatCommand, FormatMode};
+
 /// Runs the wrapper and reports process-launch or output failures to standard error.
 fn main() {
     match run() {
         Ok(exit_code) => process::exit(exit_code),
+
         Err(error) => {
             eprintln!("bclippy: {error}");
             process::exit(1);
@@ -17,38 +22,49 @@ fn main() {
     }
 }
 
-/// Handles wrapper information flags or delegates all arguments to upstream Clippy.
+/// Handles bclippy commands or delegates all arguments to upstream Clippy.
 ///
 /// Cargo adds the subcommand name as the first argument; direct invocation omits it.
 /// Arguments remain operating-system strings so paths need not be valid UTF-8.
 ///
 /// # Errors
-/// Returns an error if wrapper output cannot be written or Cargo cannot be executed.
+/// Returns an error if output cannot be written, a source operation fails, or Cargo cannot be executed.
 fn run() -> io::Result<i32> {
     let mut arguments = env::args_os().skip(1).peekable();
+
     if arguments.peek().is_some_and(|argument| argument == "bclippy") {
         arguments.next();
     }
+
     let arguments: Vec<OsString> = arguments.collect();
 
     match arguments.as_slice() {
-        [argument] if argument == "--bclippy-help" => {
+        [argument] if argument == "--help" || argument == "-h" || argument == "--bclippy-help" => {
             writeln!(
                 io::stdout().lock(),
                 "bclippy - extend upstream Clippy\n\n\
-                 Usage: cargo bclippy [CARGO OPTIONS] [-- CLIPPY OPTIONS]\n\n\
-                 All arguments are forwarded unchanged to cargo clippy.\n\
-                 Use --help or --version for upstream Clippy information.\n\n\
-                 Wrapper options (used alone):\n\
-                   --bclippy-help       Show this help\n\
-                   --bclippy-version    Show the bclippy version"
+                 Usage: cargo bclippy --check [PATH ...]\n\
+                        cargo bclippy --fix [PATH ...]\n\
+                        cargo bclippy [CARGO OPTIONS] [-- CLIPPY OPTIONS]\n\n\
+                 Options:\n\
+                   --check       Report block padding errors without modifying files; exit 1 on violations\n\
+                   --fix         Insert missing blank lines\n\
+                   -h, --help    Show this help\n\
+                   -V, --version Show the bclippy version\n\n\
+                 One executable provides both source operations without compilation.\n\
+                 Paths default to the current directory; use -- before dash-prefixed paths.\n\
+                 Other invocations forward arguments to the selected upstream cargo clippy."
             )?;
             Ok(0)
         }
-        [argument] if argument == "--bclippy-version" => {
+
+        [argument] if argument == "--version" || argument == "-V" || argument == "--bclippy-version" => {
             writeln!(io::stdout().lock(), "bclippy {}", env!("CARGO_PKG_VERSION"))?;
             Ok(0)
         }
+
+        [argument, paths @ ..] if argument == "--check" => FormatCommand::new(FormatMode::Check, paths)?.run(),
+        [argument, paths @ ..] if argument == "--fix" => FormatCommand::new(FormatMode::Fix, paths)?.run(),
         _ => run_clippy(&arguments),
     }
 }

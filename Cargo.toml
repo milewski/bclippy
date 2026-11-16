@@ -1,6 +1,6 @@
 [package]
 name = "bclippy"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2024"
 rust-version = "1.90"
 description = "Extend your Rust lint workflow while keeping upstream Clippy."
@@ -12,6 +12,11 @@ categories = ["development-tools::cargo-plugins", "development-tools::testing"]
 [[bin]]
 name = "cargo-bclippy"
 path = "src/main.rs"
+
+[dependencies]
+proc-macro2 = { version = "1", features = ["span-locations"] }
+quote = "1"
+syn = { version = "2", features = ["full", "visit"] }
 
 [lints.rust]
 unsafe_code = "forbid"

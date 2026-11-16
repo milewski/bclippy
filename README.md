@@ -19,18 +19,13 @@ The first rule gives multiline blocks the blank lines they need. `if`, `while`,
 `for`, `loop`, `match`, and other multiline block constructs are separated from
 neighboring statements while connected expressions and comments stay together.
 
-> **Development status:** the check/fix rule is being developed in
-> [PR #1](https://github.com/milewski/bclippy/pull/1). The installation below selects
-> that branch. The current `main` implementation provides the original Clippy wrapper.
-
 ## Install
 
 Build with Rust 1.90 or newer. Install Clippy for the toolchain you use to lint:
 
 ```sh
 rustup component add clippy
-cargo install --git https://github.com/milewski/bclippy \
-  --branch feat/multiline-block-padding --locked
+cargo install --git https://github.com/milewski/bclippy --locked
 ```
 
 This installs **one executable**, `cargo-bclippy`, available as `cargo bclippy`.
