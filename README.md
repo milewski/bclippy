@@ -1,98 +1,106 @@
-# bclippy
+<p align="center">
+  <img src="assets/logo.png" alt="bclippy crab mascot with curly-brace claws and a paperclip" width="220" />
+</p>
 
-Extend your Rust lint workflow while keeping upstream Cargo and Clippy.
+<h1 align="center">bclippy</h1>
 
-`bclippy` is a Cargo subcommand. Its initial implementation delegates to the
-Clippy installed for your selected Rust toolchain. It forwards arguments,
-diagnostics, and exit status, providing a foundation for additional checks
-without maintaining a fork of Cargo or Clippy.
+<p align="center"><strong>A little breathing room for your Rust code.</strong></p>
 
-Custom lint rules and Dylint integration are not implemented yet.
+<p align="center">
+  <a href="https://github.com/milewski/bclippy/actions/workflows/ci.yml"><img src="https://github.com/milewski/bclippy/actions/workflows/ci.yml/badge.svg?branch=main" alt="CI" /></a>
+  &nbsp; Stable Rust &nbsp;·&nbsp; One executable &nbsp;·&nbsp; Upstream Clippy
+</p>
+
+bclippy extends your Cargo and Clippy workflow with focused, automatically fixable
+source rules. It keeps using the Clippy installed for your selected Rust toolchain,
+so upstream improvements keep arriving with your Rust updates.
+
+The first rule gives multiline blocks the blank lines they need. `if`, `while`,
+`for`, `loop`, `match`, and other multiline block constructs are separated from
+neighboring statements while connected expressions and comments stay together.
+
+> **Development status:** the check/fix rule is being developed in
+> [PR #1](https://github.com/milewski/bclippy/pull/1). The installation below selects
+> that branch. The current `main` implementation provides the original Clippy wrapper.
 
 ## Install
 
-Build requirements: Rust 1.90 or newer. Clippy must be installed for the
-toolchain you use to lint your project.
+Build with Rust 1.90 or newer. Install Clippy for the toolchain you use to lint:
 
 ```sh
 rustup component add clippy
-cargo install --git https://github.com/milewski/bclippy --locked
+cargo install --git https://github.com/milewski/bclippy \
+  --branch feat/multiline-block-padding --locked
 ```
 
-For a local checkout:
+This installs **one executable**, `cargo-bclippy`, available as `cargo bclippy`.
+
+## Check it. Fix it.
 
 ```sh
-cargo install --path . --locked
-```
-
-The installed executable is `cargo-bclippy`, available through `cargo bclippy`.
-This project has no external dependencies.
-
-## Usage
-
-Run these commands in the Rust project you want to check:
-
-```sh
-cargo bclippy
-cargo bclippy --workspace --all-targets --all-features -- -D warnings
-cargo bclippy --message-format=json
-```
-
-Cargo options go before `--`; compiler and lint options go after it, just as
-with `cargo clippy`. Standard help and version flags are forwarded to Clippy:
-
-```sh
+cargo bclippy --check                 # report missing padding; write nothing
+cargo bclippy --fix                   # insert missing blank lines
+cargo bclippy --check src tests       # select files or directories
 cargo bclippy --help
-cargo bclippy --version
 ```
 
-To display bclippy's own help or version, use these flags on their own:
+`--check` exits with status **1** when any selected file violates the rule, so CI
+fails. `--fix` applies the same rule locally. These flags are mutually exclusive.
+Neither mode needs to compile your project.
+
+Ordinary invocations still run upstream Clippy:
 
 ```sh
-cargo bclippy --bclippy-help
-cargo bclippy --bclippy-version
+cargo bclippy --workspace --all-targets -- -D warnings
 ```
 
-Rustup toolchain selection works through Cargo:
+## What the first rule does
 
-```sh
-rustup component add clippy --toolchain stable
-cargo +stable bclippy --all-targets
+```rust
+fn process() {
+    prepare();
+
+    while has_work() {
+        process_next();
+    }
+
+    finish();
+}
 ```
 
-## Upstream updates
+`bclippy::block_padding` pads complete statements, items, and match arms. It also
+handles scopes, closures, `unsafe`, `async`, `const`, and struct literals. A block
+inside an expression is padded around its containing statement, keeping function
+arguments and method chains compatible with rustfmt.
 
-bclippy invokes the Cargo executable provided by Cargo's `CARGO` environment
-variable, falling back to `cargo` on `PATH` when that variable is absent. It runs
-the `clippy` subcommand and leaves its output unchanged, including JSON output.
+Existing blank lines, literal contents, comments, attributes, and LF/CRLF endings
+are preserved. `else` and `let … else` stay connected. Macro invocations are handled
+as complete units; their opaque bodies are not rewritten.
 
-Clippy stays managed by your Rust toolchain. Updating that toolchain updates
-Clippy without rebuilding bclippy. A project that pins its toolchain keeps using
-that pinned version.
+Run `cargo fmt` first, then `cargo bclippy --fix`. With no paths, the source rule
+scans the current directory recursively, excluding hidden directories, `target`,
+`vendor`, `node_modules`, and symlinks. All selected files must parse before any
+fix is written. Invalid syntax and filesystem failures return an error.
 
-Future checks can be coordinated alongside this invocation. Compiler-aware
-custom lints could use a separate Dylint stage, with its own compiler
-compatibility requirements. See the
-[Cargo extension documentation](https://doc.rust-lang.org/cargo/reference/external-tools.html)
-and [Dylint](https://github.com/trailofbits/dylint).
+## CI
 
-## Development
+After installing a reviewed bclippy revision in your workflow:
+
+```yaml
+- name: Check Rust block padding
+  run: cargo bclippy --check
+```
+
+Keep your existing rustfmt and Clippy checks alongside it. Use `--fix` locally;
+CI only checks and reports file/line diagnostics.
+
+## Develop
 
 ```sh
 cargo fmt --all -- --check
-cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
-cargo test --workspace --all-targets --all-features --locked
-cargo doc --workspace --all-features --no-deps --document-private-items --locked
+cargo clippy --all-targets --all-features --locked -- -D warnings
+cargo test --all-targets --all-features --locked
 ```
 
-Exercise the wrapper against this repository without installing it:
-
-```sh
-cargo build --locked
-cargo run --locked -- --bclippy-help
-cargo run --locked -- --workspace --all-targets --all-features --locked -- -D warnings
-```
-
-CI runs formatting, strict linting, tests, documentation, and a Cargo subcommand
-smoke check on Linux, macOS, and Windows. Rust 1.90 is checked separately as the
-minimum supported compiler.
+The rule implementation builds on stable Rust with `syn`. CI covers Linux,
+macOS, Windows, and the minimum supported compiler.
