@@ -1,0 +1,23 @@
+[package]
+name = "bclippy"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.90"
+description = "Extend your Rust lint workflow while keeping upstream Clippy."
+repository = "https://github.com/milewski/bclippy"
+readme = "README.md"
+keywords = ["cargo", "clippy", "lint", "cli"]
+categories = ["development-tools::cargo-plugins", "development-tools::testing"]
+
+[[bin]]
+name = "cargo-bclippy"
+path = "src/main.rs"
+
+[lints.rust]
+unsafe_code = "forbid"
+missing_docs = "warn"
+
+[lints.clippy]
+all = { level = "warn", priority = -1 }
+pedantic = { level = "warn", priority = -1 }
+missing_docs_in_private_items = "warn"

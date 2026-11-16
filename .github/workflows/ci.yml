@@ -1,0 +1,53 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    name: Rust ${{ matrix.toolchain }} on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        toolchain: [stable]
+        include:
+          - os: ubuntu-latest
+            toolchain: '1.90.0'
+    defaults:
+      run:
+        shell: bash
+    env:
+      CARGO_TERM_COLOR: always
+      RUSTDOCFLAGS: -D warnings
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Install Rust
+        run: |
+          rustup toolchain install "${{ matrix.toolchain }}" --profile minimal --component clippy --component rustfmt
+          rustup default "${{ matrix.toolchain }}"
+      - name: Check formatting
+        run: cargo fmt --all -- --check
+      - name: Lint
+        run: >-
+          cargo clippy --workspace --all-targets --all-features --locked --
+          -D warnings -D clippy::pedantic -D missing_docs -D clippy::missing_docs_in_private_items
+      - name: Test
+        run: cargo test --workspace --all-targets --all-features --locked
+      - name: Build documentation
+        run: cargo doc --workspace --all-features --no-deps --document-private-items --locked
+      - name: Check Cargo subcommand
+        run: |
+          cargo install --path . --locked --root target/install
+          export PATH="$PWD/target/install/bin:$PATH"
+          cargo bclippy --bclippy-version
+          cargo bclippy --workspace --all-targets --all-features --locked -- -D warnings
