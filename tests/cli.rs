@@ -218,4 +218,83 @@ mod unix {
 
         assert_eq!(output.status.signal(), Some(15));
     }
+
+    #[test]
+    fn padding_check_fails_without_modifying_source_or_starting_cargo() {
+        let fixture = CargoFixture::new("exit 99");
+        let source = "fn example() {\n    before();\n    if ready {\n        work();\n    }\n    after();\n}\n";
+        let path = fixture.directory.join("example.rs");
+        fs::write(&path, source).unwrap();
+        let output = fixture.command().args(["--bclippy-check", "example.rs"]).output().unwrap();
+
+        assert_eq!(output.status.code(), Some(1));
+        assert!(String::from_utf8(output.stderr).unwrap().contains("[bclippy::block_padding]"));
+        assert_eq!(fs::read_to_string(path).unwrap(), source);
+    }
+
+    #[test]
+    fn padding_fix_then_check_succeeds_without_cargo() {
+        let fixture = CargoFixture::new("exit 99");
+        let source = "fn example() {\n    before();\n    while ready {\n        work();\n    }\n    after();\n}\n";
+        let path = fixture.directory.join("example.rs");
+        fs::write(&path, source).unwrap();
+        let output = fixture.command().args(["bclippy", "--bclippy-fix", "example.rs"]).output().unwrap();
+
+        assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+        assert_eq!(
+            fs::read_to_string(path).unwrap(),
+            source
+                .replace("    while ready", "\n    while ready")
+                .replace("    after();", "\n    after();")
+        );
+        assert!(
+            fixture
+                .command()
+                .args(["--bclippy-check", "example.rs"])
+                .status()
+                .unwrap()
+                .success()
+        );
+    }
+
+    #[test]
+    fn parse_failure_prevents_all_planned_writes() {
+        let fixture = CargoFixture::new("exit 99");
+        let source = "fn example() {\n    before();\n    match value {\n        _ => work(),\n    }\n}\n";
+        let path = fixture.directory.join("a_valid.rs");
+        fs::write(&path, source).unwrap();
+        fs::write(fixture.directory.join("z_invalid.rs"), "fn incomplete( {").unwrap();
+        let output = fixture.command().arg("--bclippy-fix").output().unwrap();
+
+        assert!(!output.status.success());
+        assert!(String::from_utf8(output.stderr).unwrap().contains("z_invalid.rs"));
+        assert_eq!(fs::read_to_string(path).unwrap(), source);
+    }
+
+    #[test]
+    fn recursive_discovery_skips_build_vendor_hidden_and_symlink_sources() {
+        let fixture = CargoFixture::new("exit 99");
+        fs::write(fixture.directory.join("example.rs"), "fn example() {}\n").unwrap();
+
+        for directory in ["target", "vendor", "node_modules", ".hidden"] {
+            let path = fixture.directory.join(directory);
+            fs::create_dir(&path).unwrap();
+            fs::write(path.join("invalid.rs"), "fn incomplete( {").unwrap();
+        }
+
+        std::os::unix::fs::symlink("vendor/invalid.rs", fixture.directory.join("linked.rs")).unwrap();
+        let output = fixture.command().arg("--bclippy-check").output().unwrap();
+
+        assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+        assert!(String::from_utf8(output.stderr).unwrap().contains("checked 1 Rust files"));
+    }
+
+    #[test]
+    fn empty_source_selection_is_an_error() {
+        let fixture = CargoFixture::new("exit 99");
+        let output = fixture.command().arg("--bclippy-check").output().unwrap();
+
+        assert!(!output.status.success());
+        assert!(String::from_utf8(output.stderr).unwrap().contains("no Rust source files"));
+    }
 }

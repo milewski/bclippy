@@ -1,4 +1,6 @@
-//! Cargo subcommand that delegates to the selected toolchain's upstream Clippy.
+//! Cargo subcommand combining upstream Clippy with compiler-independent style rules.
+
+mod formatting;
 
 use std::env;
 use std::ffi::OsString;
@@ -6,10 +8,13 @@ use std::io::{self, Write};
 use std::path::Path;
 use std::process::{self, Command};
 
+use formatting::{FormatCommand, FormatMode};
+
 /// Runs the wrapper and reports process-launch or output failures to standard error.
 fn main() {
     match run() {
         Ok(exit_code) => process::exit(exit_code),
+
         Err(error) => {
             eprintln!("bclippy: {error}");
             process::exit(1);
@@ -17,7 +22,7 @@ fn main() {
     }
 }
 
-/// Handles wrapper information flags or delegates all arguments to upstream Clippy.
+/// Handles bclippy commands or delegates all arguments to upstream Clippy.
 ///
 /// Cargo adds the subcommand name as the first argument; direct invocation omits it.
 /// Arguments remain operating-system strings so paths need not be valid UTF-8.
@@ -26,9 +31,11 @@ fn main() {
 /// Returns an error if wrapper output cannot be written or Cargo cannot be executed.
 fn run() -> io::Result<i32> {
     let mut arguments = env::args_os().skip(1).peekable();
+
     if arguments.peek().is_some_and(|argument| argument == "bclippy") {
         arguments.next();
     }
+
     let arguments: Vec<OsString> = arguments.collect();
 
     match arguments.as_slice() {
@@ -41,14 +48,22 @@ fn run() -> io::Result<i32> {
                  Use --help or --version for upstream Clippy information.\n\n\
                  Wrapper options (used alone):\n\
                    --bclippy-help       Show this help\n\
-                   --bclippy-version    Show the bclippy version"
+                   --bclippy-version    Show the bclippy version\n\n\
+                 Source rules (run without Clippy or compilation):\n\
+                   --bclippy-check [PATH ...]  Check multiline block padding\n\
+                   --bclippy-fix [PATH ...]    Insert missing blank lines\n\
+                 Paths default to the current directory; use -- before dash-prefixed paths."
             )?;
             Ok(0)
         }
+
         [argument] if argument == "--bclippy-version" => {
             writeln!(io::stdout().lock(), "bclippy {}", env!("CARGO_PKG_VERSION"))?;
             Ok(0)
         }
+
+        [argument, paths @ ..] if argument == "--bclippy-check" => FormatCommand::new(FormatMode::Check, paths)?.run(),
+        [argument, paths @ ..] if argument == "--bclippy-fix" => FormatCommand::new(FormatMode::Fix, paths)?.run(),
         _ => run_clippy(&arguments),
     }
 }

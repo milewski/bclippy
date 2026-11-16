@@ -43,6 +43,8 @@ jobs:
           -D warnings -D clippy::pedantic -D missing_docs -D clippy::missing_docs_in_private_items
       - name: Test
         run: cargo test --workspace --all-targets --all-features --locked
+      - name: Test documentation examples
+        run: cargo test --workspace --all-features --doc --locked
       - name: Build documentation
         run: cargo doc --workspace --all-features --no-deps --document-private-items --locked
       - name: Check Cargo subcommand
@@ -50,4 +52,5 @@ jobs:
           cargo install --path . --locked --root target/install
           export PATH="$PWD/target/install/bin:$PATH"
           cargo bclippy --bclippy-version
+          cargo bclippy --bclippy-check src tests
           cargo bclippy --workspace --all-targets --all-features --locked -- -D warnings
