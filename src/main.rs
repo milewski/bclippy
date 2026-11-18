@@ -48,7 +48,7 @@ fn run() -> io::Result<i32> {
                         cargo bclippy [CARGO OPTIONS] [-- CLIPPY OPTIONS]\n\n\
                  Options:\n\
                    --check       Report block padding errors without modifying files; exit 1 on violations\n\
-                   --fix         Insert missing blank lines\n\
+                   --fix         Fix missing or redundant blank-line padding\n\
                    -h, --help    Show this help\n\
                    -V, --version Show the bclippy version\n\n\
                  One executable provides both source operations without compilation.\n\

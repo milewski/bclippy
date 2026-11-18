@@ -1,0 +1,10 @@
+fn configure() {
+    let cases = [
+        ("Ollama cloud models not turned off (OLLAMA_NO_CLOUD)", |machine| {
+            machine.succeeding.insert(
+                "systemctl show ollama.service --property=LoadState --property=Environment".into(),
+                "LoadState=loaded\nEnvironment=OLLAMA_HOST=127.0.0.1:11434\n".into(),
+            );
+        }),
+    ];
+}

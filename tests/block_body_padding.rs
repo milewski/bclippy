@@ -10,7 +10,7 @@ fn padded(source: &str) -> String {
         source.parse::<TokenStream>().unwrap().to_string(),
         output.parse::<TokenStream>().unwrap().to_string()
     );
-    assert!(RustSource::parse(&output).unwrap().padded().lines().is_empty());
+    assert_eq!(RustSource::parse(&output).unwrap().padded().lines(), []);
     output
 }
 
@@ -23,7 +23,16 @@ fn nested_outbox_loops_get_inner_padding_without_rewriting_assertion_macros() {
 }
 
 #[test]
-fn timeout_async_and_loop_bodies_get_padding_while_tiny_if_stays_compact() {
+fn a_single_expression_closure_removes_inner_padding_from_the_ollama_example() {
+    let source = include_str!("fixtures/ollama_padded.txt");
+    let expected = include_str!("fixtures/ollama_compact.txt");
+
+    assert_eq!(padded(source), expected);
+    assert_eq!(padded(expected), expected);
+}
+
+#[test]
+fn timeout_loop_gets_padding_while_single_expression_async_and_if_stay_compact() {
     let source = include_str!("fixtures/timeout_unpadded.txt");
     let expected = include_str!("fixtures/timeout_padded.txt");
 
@@ -73,10 +82,106 @@ fn complex_match_arm_bodies_get_padding_without_separating_patterns_or_commas() 
 }
 
 #[test]
-fn a_single_statement_spanning_several_lines_gets_inner_padding() {
+fn a_single_expression_spanning_several_lines_stays_compact() {
     let source = "fn example() {\n    if ready {\n        process(\n            first,\n            second,\n        );\n    }\n}\n";
+
+    assert_eq!(padded(source), source);
+}
+
+#[test]
+fn single_expressions_with_or_without_semicolons_are_compact_across_block_kinds() {
+    for header in [
+        "if ready",
+        "while ready",
+        "while let Some(value) = next()",
+        "for value in values",
+        "loop",
+        "unsafe",
+        "let result = async move",
+        "let result = const",
+        "let result = move ||",
+        "let result = try",
+        "'scope:",
+        "",
+    ] {
+        for ending in ["", ";"] {
+            let source = format!(
+                "fn example() {{\n    {header} {{\n\n        process(\n            first,\n            second,\n        ){ending}\n\n    }};\n}}\n"
+            );
+            let expected = format!(
+                "fn example() {{\n    {header} {{\n        process(\n            first,\n            second,\n        ){ending}\n    }};\n}}\n"
+            );
+
+            assert_eq!(padded(&source), expected, "body: {header}, ending: {ending}");
+        }
+    }
+}
+
+#[test]
+fn function_and_method_single_expression_bodies_remove_existing_padding() {
+    let source = "fn example() {\n\n    process(\n        first,\n        second,\n    );\n\n}\n\nimpl Example {\n    fn method(&self) {\n\n        self.process()\n\n    }\n}\n";
+    let expected = "fn example() {\n    process(\n        first,\n        second,\n    );\n}\n\nimpl Example {\n    fn method(&self) {\n        self.process()\n    }\n}\n";
+
+    assert_eq!(padded(source), expected);
+}
+
+#[test]
+fn mixed_insertions_and_removals_retain_original_diagnostic_lines() {
+    let source = "fn example() {\n    before();\n    loop {\n        first();\n        if ready {\n\n            work();\n\n        }\n        last();\n    }\n    after();\n}\n";
+    let expected = "fn example() {\n    before();\n\n    loop {\n\n        first();\n\n        if ready {\n            work();\n        }\n\n        last();\n\n    }\n\n    after();\n}\n";
+    let result = RustSource::parse(source).unwrap().padded();
+
+    assert_eq!(result.lines(), [3, 4, 5, 6, 8, 10, 11, 12]);
+    assert_eq!(padded(source), expected);
+}
+
+#[test]
+fn compacting_preserves_nested_comments_attributes_and_literal_blank_lines() {
+    let source = "fn example() {\n    loop { // header\n\n        /* leading\n\n           /* nested */ comment */\n        // explains the expression\n        #[cfg(test)]\n        process(r#\"first\n\nlast\"#); /* trailing\n\n           /* nested */ comment */\n\n        // explains the closing edge\n\n    }\n}\n";
     let expected = source
-        .replace("        process(", "\n        process(")
+        .replace("// header\n\n", "// header\n")
+        .replace(
+            "comment */\n\n        // explains the closing",
+            "comment */\n        // explains the closing",
+        )
+        .replace("// explains the closing edge\n\n", "// explains the closing edge\n");
+
+    assert_eq!(padded(source), expected);
+}
+
+#[test]
+fn opaque_inner_attributes_never_lose_literal_blank_lines() {
+    let source = "fn example() {\n\n    #![doc = r#\"first\n\nlast\"#]\n    process();\n\n}\n";
+    let expected = source.replace("    process();\n\n", "    process();\n");
+
+    assert_eq!(padded(source), expected);
+}
+
+#[test]
+fn compacting_preserves_unicode_line_endings_and_prefix_offsets() {
+    for prefix in [
+        "",
+        "\u{feff}",
+        "#!/usr/bin/env rust-script\r\n",
+        "\u{feff}#!/usr/bin/env rust-script\r\n",
+    ] {
+        let source = format!("{prefix}fn café() {{\r\n    loop {{\r\n \t\r\n        process(\"你好\");\r\n\r\n    }}\r\n}}\r\n");
+        let expected = format!("{prefix}fn café() {{\r\n    loop {{\r\n        process(\"你好\");\r\n    }}\r\n}}\r\n");
+        let result = RustSource::parse(&source).unwrap().padded();
+        let prefix_lines = prefix.bytes().filter(|byte| *byte == b'\n').count();
+
+        assert_eq!(result.source(), expected);
+        assert_eq!(result.lines(), [3 + prefix_lines, 5 + prefix_lines]);
+        assert_eq!(RustSource::parse(result.source()).unwrap().padded().lines(), []);
+    }
+}
+
+#[test]
+fn a_multiline_local_declaration_keeps_its_existing_padding_rule() {
+    let source =
+        "fn example() {\n    if ready {\n        let result = process(\n            first,\n            second,\n        );\n    }\n}\n";
+    let expected = source
+        .replace("        let result", "\n        let result")
         .replace("    }\n}", "\n    }\n}");
 
     assert_eq!(padded(source), expected);
@@ -155,6 +260,6 @@ fn inner_padding_preserves_unicode_crlf_and_prefix_offsets() {
 
         assert_eq!(result.source(), expected);
         assert_eq!(result.lines(), [3 + prefix_lines, 5 + prefix_lines]);
-        assert!(RustSource::parse(result.source()).unwrap().padded().lines().is_empty());
+        assert_eq!(RustSource::parse(result.source()).unwrap().padded().lines(), []);
     }
 }

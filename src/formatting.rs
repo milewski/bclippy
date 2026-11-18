@@ -106,7 +106,7 @@ impl FormatCommand {
                 FormatMode::Check => {
                     for line in change.padding.lines() {
                         eprintln!(
-                            "{}:{line}:1: missing blank line around or inside a multiline block [bclippy::block_padding]",
+                            "{}:{line}:1: incorrect blank-line padding around or inside a multiline block [bclippy::block_padding]",
                             change.path.display()
                         );
                     }

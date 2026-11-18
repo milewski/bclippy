@@ -273,17 +273,47 @@ mod unix {
     }
 
     #[test]
+    fn padding_cli_rejects_and_removes_single_expression_inner_padding() {
+        let fixture = CargoFixture::new("exit 99");
+        let source = include_str!("fixtures/ollama_padded.txt");
+        let expected = include_str!("fixtures/ollama_compact.txt");
+        let path = fixture.directory.join("example.rs");
+        fs::write(&path, source).unwrap();
+
+        let checked = fixture.command().args(["--check", "example.rs"]).output().unwrap();
+
+        assert_eq!(checked.status.code(), Some(1));
+        assert_eq!(fs::read_to_string(&path).unwrap(), source);
+        let diagnostics = String::from_utf8(checked.stderr).unwrap();
+        assert!(diagnostics.contains("[bclippy::block_padding]"));
+        assert!(diagnostics.contains("example.rs:4:1:"));
+        assert!(diagnostics.contains("example.rs:9:1:"));
+
+        let fixed = fixture.command().args(["--fix", "example.rs"]).output().unwrap();
+
+        assert!(fixed.status.success(), "{}", String::from_utf8_lossy(&fixed.stderr));
+        assert_eq!(fs::read_to_string(&path).unwrap(), expected);
+        assert!(fixture.command().args(["--check", "example.rs"]).status().unwrap().success());
+        assert!(fixture.command().args(["--fix", "example.rs"]).status().unwrap().success());
+        assert_eq!(fs::read_to_string(path).unwrap(), expected);
+    }
+
+    #[test]
     fn parse_failure_prevents_all_planned_writes() {
         let fixture = CargoFixture::new("exit 99");
         let source = "fn example() {\n    before();\n    match value {\n        _ => work(),\n    }\n}\n";
         let path = fixture.directory.join("a_valid.rs");
         fs::write(&path, source).unwrap();
+        let padded_path = fixture.directory.join("b_padded.rs");
+        let padded_source = include_str!("fixtures/ollama_padded.txt");
+        fs::write(&padded_path, padded_source).unwrap();
         fs::write(fixture.directory.join("z_invalid.rs"), "fn incomplete( {").unwrap();
         let output = fixture.command().arg("--fix").output().unwrap();
 
         assert!(!output.status.success());
         assert!(String::from_utf8(output.stderr).unwrap().contains("z_invalid.rs"));
         assert_eq!(fs::read_to_string(path).unwrap(), source);
+        assert_eq!(fs::read_to_string(padded_path).unwrap(), padded_source);
     }
 
     #[test]

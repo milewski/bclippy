@@ -25,9 +25,7 @@ async fn urgency_is_fair_across_cases_without_reordering_updates_to_the_same_cas
         settled.push(expected);
 
         for (index, (state, _)) in outbox.rows().iter().enumerate() {
-
             assert_eq!(state, if settled.contains(&index) { "refused" } else { "pending" });
-
         }
 
     }

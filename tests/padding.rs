@@ -175,11 +175,8 @@ fn inner_padding_preserves_trailing_nested_comment_contents() {
 }
 
 #[test]
-fn inline_nested_braces_make_an_otherwise_single_line_body_complex() {
+fn a_single_macro_expression_with_inline_nested_braces_stays_compact() {
     let source = "fn example() {\n    for state in states {\n        assert_eq!(state, if completed { \"refused\" } else { \"pending\" });\n    }\n}\n";
-    let expected = source
-        .replace("        assert_eq!", "\n        assert_eq!")
-        .replace("    }\n", "\n    }\n");
 
-    assert_eq!(padded(source), expected);
+    assert_eq!(padded(source), source);
 }

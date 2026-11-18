@@ -18,8 +18,8 @@ so upstream improvements keep arriving with your Rust updates.
 The block-padding rule gives multiline blocks the blank lines they need. `if`,
 `while`, `for`, `loop`, `match`, and other multiline block constructs are separated
 from neighboring statements. Complex executable bodies also get blank lines
-inside their braces, while tiny bodies, connected expressions, and comments stay
-together.
+inside their braces. A body containing just one expression stays compact, including
+a multiline call; any existing inner padding around it is removed.
 
 ## Install
 
@@ -35,8 +35,8 @@ This installs **one executable**, `cargo-bclippy`, available as `cargo bclippy`.
 ## Check it. Fix it.
 
 ```sh
-cargo bclippy --check                 # report missing padding; write nothing
-cargo bclippy --fix                   # insert missing blank lines
+cargo bclippy --check                 # report incorrect padding; write nothing
+cargo bclippy --fix                   # insert missing or remove redundant padding
 cargo bclippy --check src tests       # select files or directories
 cargo bclippy --help
 ```
@@ -73,16 +73,20 @@ handles scopes, closures, `unsafe`, `async`, `const`, and struct literals. A blo
 inside an expression is padded around its containing statement, keeping function
 arguments and method chains compatible with rustfmt.
 
-Inside executable blocks, a body needs padding when it has multiple statements,
-a statement spanning multiple source lines, or nested brace syntax. This applies
-recursively to loops, conditionals, async blocks, closures, and other executable
-scopes. For example, the loop and async body below get padding while the tiny
-`if` body stays compact:
+Inside executable blocks, a body needs padding when it has multiple statements or
+a complex declaration. A single expression needs no inner padding, even if it
+spans multiple source lines or contains nested braces. Expression statements with
+a semicolon and standalone macro invocations follow the same rule. The fixer
+removes existing empty lines at their body edges. A single multiline declaration
+such as `let result = process(...);` retains the declaration-padding rule.
+
+This applies recursively to loops, conditionals, async blocks, closures, and other
+executable scopes. For example, the loop below gets padding because it has two
+statements. The async body has only that loop expression and stays compact:
 
 ```rust
 async fn wait() {
     let response = tokio::time::timeout(Duration::from_secs(15), async {
-
         loop {
 
             if let Ok(response) = client.get(&address).send().await {
@@ -92,9 +96,21 @@ async fn wait() {
             tokio::time::sleep(Duration::from_millis(20)).await;
 
         }
-
     })
     .await;
+}
+```
+
+A closure containing one multiline call stays compact too:
+
+```rust
+fn configure() {
+    let cases = [("Ollama cloud models not turned off (OLLAMA_NO_CLOUD)", |machine| {
+        machine.succeeding.insert(
+            "systemctl show ollama.service --property=LoadState --property=Environment".into(),
+            "LoadState=loaded\nEnvironment=OLLAMA_HOST=127.0.0.1:11434\n".into(),
+        );
+    })];
 }
 ```
 
@@ -102,9 +118,11 @@ Function and method bodies keep their outer edges compact. Empty bodies,
 single-line blocks, struct fields, and declaration containers get no inner
 padding.
 
-Existing blank lines, literal contents, comments, attributes, and LF/CRLF endings
-are preserved. `else` and `let … else` stay connected. Macro invocations are handled
-as complete units; their opaque bodies are not rewritten.
+Existing blank lines outside single-expression body-edge gaps are preserved, as
+are literal contents, comments, attributes, and LF/CRLF endings. Blank lines inside
+nested block comments or literals are never removed. Gaps containing opaque syntax
+such as inner attributes are left unchanged. `else` and `let … else` stay connected.
+Macro invocations are handled as complete units; their opaque bodies are not rewritten.
 
 Run `cargo fmt` first, then `cargo bclippy --fix`: rustfmt removes inner padding,
 so rerun bclippy after formatting. With no paths, the source rule scans the

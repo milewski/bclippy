@@ -43,35 +43,51 @@ impl<'source> RustSource<'source> {
         })
     }
 
-    /// Inserts missing empty lines around multiline constructs and inside complex blocks.
+    /// Normalizes empty lines around multiline constructs and inside executable blocks.
     ///
     /// Sibling statements, items, and match arms are separated at safe boundaries.
     /// Executable blocks receive inner padding when their bodies contain multiple
-    /// statements, a multiline statement, or nested braces. Tiny one-line bodies
-    /// and function-body edges stay compact. Connected syntax and macro bodies
-    /// stay intact; comments, existing blank lines, and LF/CRLF endings are preserved.
+    /// statements, a multiline declaration, or nested braces in a declaration.
+    /// A lone expression or macro invocation stays compact even when multiline;
+    /// existing inner padding is removed. Function-body edges get no padding.
+    /// Connected syntax, comments, literals, attributes, macro contents, and LF/CRLF
+    /// endings stay intact. Existing padding elsewhere is preserved.
     #[must_use]
     pub fn padded(&self) -> Padding {
         let mut visitor = PaddingVisitor {
             source: self.source,
             insertions: BTreeSet::new(),
+            removals: BTreeSet::new(),
             syntax_offset: self.syntax_offset,
         };
 
         visitor.visit_file(&self.syntax);
 
         let mut output = String::with_capacity(self.source.len() + visitor.insertions.len() * 2);
+        let mut edits: Vec<_> = visitor
+            .insertions
+            .into_iter()
+            .map(|offset| PaddingEdit::InsertLine { offset })
+            .chain(
+                visitor
+                    .removals
+                    .into_iter()
+                    .map(|(start, end)| PaddingEdit::RemoveLine { range: start..end }),
+            )
+            .collect();
+        edits.sort_unstable_by_key(PaddingEdit::start);
         let mut previous_offset = 0;
         let mut original_line = 1;
-        let mut lines = Vec::with_capacity(visitor.insertions.len());
+        let mut lines = Vec::with_capacity(edits.len());
 
-        for offset in visitor.insertions {
-            let segment = &self.source[previous_offset..offset];
+        for edit in edits {
+            let segment = &self.source[previous_offset..edit.start()];
             original_line += segment.bytes().filter(|byte| *byte == b'\n').count();
             output.push_str(segment);
-            output.push_str(if self.source[..offset].ends_with("\r\n") { "\r\n" } else { "\n" });
+            output.push_str(edit.replacement(self.source));
             lines.push(original_line);
-            previous_offset = offset;
+            original_line += self.source[edit.start()..edit.end()].bytes().filter(|byte| *byte == b'\n').count();
+            previous_offset = edit.end();
         }
 
         output.push_str(&self.source[previous_offset..]);
@@ -79,12 +95,56 @@ impl<'source> RustSource<'source> {
     }
 }
 
-/// A whitespace-only replacement and the original line numbers that need padding.
+/// A whitespace-only replacement and the original line numbers needing padding changes.
 pub struct Padding {
-    /// Complete source with missing empty lines inserted.
+    /// Complete source with missing padding inserted and redundant inner padding removed.
     output: String,
-    /// Original one-based lines immediately following an inserted empty line.
+    /// Original one-based lines needing an insertion or removal.
     lines: Vec<usize>,
+}
+
+/// An insertion or complete whitespace-only line removal in original source coordinates.
+///
+/// Sibling gaps and body-edge gaps are disjoint. Single-expression bodies never
+/// request inner insertions, and each set deduplicates edits before ordering them.
+enum PaddingEdit {
+    /// Adds one line ending at a safe line start.
+    InsertLine {
+        /// Original byte offset before the following source line.
+        offset: usize,
+    },
+    /// Removes one empty physical line outside comments and literals.
+    RemoveLine {
+        /// Entire original line, including whitespace and its LF/CRLF ending.
+        range: Range<usize>,
+    },
+}
+
+impl PaddingEdit {
+    /// Returns the first original byte affected by this change.
+    fn start(&self) -> usize {
+        match self {
+            Self::InsertLine { offset } => *offset,
+            Self::RemoveLine { range } => range.start,
+        }
+    }
+
+    /// Returns the first original byte retained after this change.
+    fn end(&self) -> usize {
+        match self {
+            Self::InsertLine { offset } => *offset,
+            Self::RemoveLine { range } => range.end,
+        }
+    }
+
+    /// Selects the neighboring line ending for insertions and no bytes for removals.
+    fn replacement(&self, source: &str) -> &'static str {
+        match self {
+            Self::InsertLine { offset } if source[..*offset].ends_with("\r\n") => "\r\n",
+            Self::InsertLine { .. } => "\n",
+            Self::RemoveLine { .. } => "",
+        }
+    }
 }
 
 impl Padding {
@@ -109,12 +169,14 @@ struct Construct {
     multiline: bool,
 }
 
-/// Collects deduplicated insertion positions without rewriting Rust tokens.
+/// Collects disjoint, deduplicated padding edits without rewriting Rust tokens.
 struct PaddingVisitor<'source> {
     /// Original file used to distinguish empty lines from lines inside comments.
     source: &'source str,
     /// Safe line starts needing exactly one extra line ending.
     insertions: BTreeSet<usize>,
+    /// Complete empty lines removed only from single-expression body-edge gaps.
+    removals: BTreeSet<(usize, usize)>,
     /// Original prefix length omitted from the syntax parser's byte coordinates.
     syntax_offset: usize,
 }
@@ -127,7 +189,9 @@ impl PaddingVisitor<'_> {
         };
 
         if block.brace_token.span.open().start().line == block.brace_token.span.close().end().line
-            || (block.stmts.len() == 1 && first.span().start().line == first.span().end().line && !has_braces(first.to_token_stream()))
+            || (block.stmts.len() == 1
+                && (matches!(first, syn::Stmt::Expr(..) | syn::Stmt::Macro(_))
+                    || (first.span().start().line == first.span().end().line && !has_braces(first.to_token_stream()))))
         {
             return;
         }
@@ -149,6 +213,68 @@ impl PaddingVisitor<'_> {
                 self.insertions.insert(closing_line);
             }
         }
+    }
+
+    /// Removes inner padding around a lone expression, including a trailing semicolon or macro invocation.
+    fn single_expression_body(&mut self, block: &syn::Block) {
+        let [statement @ (syn::Stmt::Expr(..) | syn::Stmt::Macro(_))] = block.stmts.as_slice() else {
+            return;
+        };
+        let opening = block.brace_token.span.open().byte_range().end + self.syntax_offset;
+        let statement_range = statement.span().byte_range();
+        let closing = block.brace_token.span.close().byte_range().start + self.syntax_offset;
+        self.remove_empty_lines(opening..statement_range.start + self.syntax_offset);
+        self.remove_empty_lines(statement_range.end + self.syntax_offset..closing);
+    }
+
+    /// Removes complete empty lines in a whitespace/comment gap, preserving nested comment contents.
+    ///
+    /// The first partial line belongs to the preceding token and is never removed.
+    /// Non-trivia syntax, such as an inner attribute, keeps the entire gap unchanged.
+    fn remove_empty_lines(&mut self, range: Range<usize>) {
+        let gap = self.source[range.clone()].as_bytes();
+        let mut offset = 0;
+        let mut comment_depth = 0;
+        let mut line_has_content = true;
+        let mut line_start = range.start;
+        let mut removals = Vec::new();
+
+        while offset < gap.len() {
+            let byte = gap[offset];
+            let following = gap.get(offset + 1).copied();
+
+            if byte == b'/' && following == Some(b'*') {
+                comment_depth += 1;
+                line_has_content = true;
+                offset += 2;
+            } else if comment_depth > 0 && byte == b'*' && following == Some(b'/') {
+                comment_depth -= 1;
+                offset += 2;
+            } else if comment_depth == 0 && byte == b'/' && following == Some(b'/') {
+                line_has_content = true;
+
+                while offset < gap.len() && gap[offset] != b'\n' {
+                    offset += 1;
+                }
+            } else if byte == b'\n' {
+                if comment_depth == 0 && !line_has_content {
+                    removals.push((line_start, range.start + offset + 1));
+                }
+
+                line_has_content = comment_depth > 0;
+                line_start = range.start + offset + 1;
+                offset += 1;
+            } else if comment_depth > 0 {
+                line_has_content = true;
+                offset += 1;
+            } else if byte.is_ascii_whitespace() {
+                offset += 1;
+            } else {
+                return;
+            }
+        }
+
+        self.removals.extend(removals);
     }
 
     /// Checks adjacent complete constructs, never the edges of their container.
@@ -203,8 +329,9 @@ impl<'syntax> Visit<'syntax> for PaddingVisitor<'_> {
         visit::visit_file(self, node);
     }
 
-    /// Checks statements, including a block's final expression.
+    /// Compacts single-expression body edges and checks neighboring statements.
     fn visit_block(&mut self, node: &'syntax syn::Block) {
+        self.single_expression_body(node);
         self.sequence(&node.stmts);
         visit::visit_block(self, node);
     }
