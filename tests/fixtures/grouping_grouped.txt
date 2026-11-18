@@ -1,0 +1,16 @@
+fn example() {
+    for shared in [files, locked] {
+
+        let index = shared.iter().find(|file| file.path == "index.html").unwrap();
+        let html = std::str::from_utf8(&index.bytes).unwrap();
+        let declaration = "<link rel=\"icon\" type=\"image/png\" sizes=\"32x32\" href=\"favicon.png\">";
+        let icon = shared.iter().find(|file| file.path == "favicon.png").unwrap();
+
+        assert_eq!(icon.content_type, "image/png");
+        assert_eq!(icon.bytes, include_bytes!("../../../public/favicon-32.png"));
+
+        assert!(html.find(declaration).unwrap() < html.find("</head>").unwrap());
+        assert!(!html.contains("href=\"/favicon"));
+
+    }
+}

@@ -238,6 +238,7 @@ fn raw_literal_contents_are_preserved_when_the_surrounding_body_gets_padded() {
     let source = "fn example() {\n    loop {\n        let text = r#\"first {\n\n} last\"#;\n        consume(text);\n    }\n}\n";
     let expected = source
         .replace("        let text", "\n        let text")
+        .replace("        consume(text)", "\n        consume(text)")
         .replace("    }\n}", "\n    }\n}");
 
     assert_eq!(padded(source), expected);

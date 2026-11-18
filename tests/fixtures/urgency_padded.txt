@@ -1,6 +1,7 @@
 #[tokio::test]
 async fn urgency_is_fair_across_cases_without_reordering_updates_to_the_same_case() {
     let outbox = Outbox::open().await;
+
     outbox
         .fixture
         .server
@@ -14,6 +15,7 @@ async fn urgency_is_fair_across_cases_without_reordering_updates_to_the_same_cas
             [Utc::now().to_rfc3339_opts(SecondsFormat::Millis, true)],
         )
         .unwrap();
+
     let messenger = Scripted::new((0..7).map(|_| Reply::Failure(TelegramError::Status(403))).collect());
     let courier = TelegramCourier::new(outbox.fixture.server.state.database.clone(), messenger.clone());
     let cancellation = CancellationToken::new();
@@ -22,6 +24,7 @@ async fn urgency_is_fair_across_cases_without_reordering_updates_to_the_same_cas
     for expected in [1, 2, 3, 0, 4, 5, 6] {
 
         assert!(courier.deliver_next(&cancellation).await.unwrap());
+
         settled.push(expected);
 
         for (index, (state, _)) in outbox.rows().iter().enumerate() {
@@ -31,5 +34,6 @@ async fn urgency_is_fair_across_cases_without_reordering_updates_to_the_same_cas
     }
 
     assert_eq!(messenger.attempts.load(Ordering::Acquire), 7);
+
     outbox.fixture.server.close().await.unwrap();
 }

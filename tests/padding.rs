@@ -29,6 +29,7 @@ fn browser_bootstrap_gets_padding_on_both_sides_of_if() {
 }
 "#;
     let expected = source
+        .replace("    input.take", "\n    input.take")
         .replace("    if bytes.len()", "\n    if bytes.len()")
         .replace("    Ok(serde_json", "\n    Ok(serde_json");
 
@@ -67,10 +68,19 @@ fn block_edges_and_single_line_blocks_need_no_padding() {
     for source in [
         "fn example() {\n    if ready {\n        work();\n    }\n}\n",
         "fn example() {\n    before();\n    if ready { work(); }\n    after();\n}\n",
-        "fn example() {\n    before();\n    let text = \"{\\n}\";\n    after();\n}\n",
     ] {
         assert_eq!(padded(source), source);
     }
+}
+
+#[test]
+fn braces_inside_literals_preserve_the_binding_and_expression_group_boundaries() {
+    let source = "fn example() {\n    before();\n    let text = \"{\\n}\";\n    after();\n}\n";
+    let expected = source
+        .replace("    let text", "\n    let text")
+        .replace("    after();", "\n    after();");
+
+    assert_eq!(padded(source), expected);
 }
 
 #[test]

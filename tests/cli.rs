@@ -205,6 +205,12 @@ mod unix {
         child.stdin.take().unwrap().write_all(b"inherited stdin\n").unwrap();
         let output = child.wait_with_output().unwrap();
 
+        assert!(
+            output.status.success(),
+            "status: {}; stderr: {}",
+            output.status,
+            String::from_utf8_lossy(&output.stderr)
+        );
         assert_eq!(
             output.stdout,
             format!("{}\ninherited environment\ninherited stdin\n", fixture.directory.display()).as_bytes()
@@ -299,6 +305,31 @@ mod unix {
     }
 
     #[test]
+    fn grouping_check_and_fix_separate_bindings_and_distinct_macro_names() {
+        let fixture = CargoFixture::new("exit 99");
+        let source = "fn example() {\n    let value = 1;\n    assert_eq!(value, 1);\n    assert!(value > 0);\n}\n";
+        let expected = "fn example() {\n    let value = 1;\n\n    assert_eq!(value, 1);\n\n    assert!(value > 0);\n}\n";
+        let path = fixture.directory.join("example.rs");
+        fs::write(&path, source).unwrap();
+
+        let checked = fixture.command().args(["--check", "example.rs"]).output().unwrap();
+
+        assert_eq!(checked.status.code(), Some(1));
+        assert_eq!(fs::read_to_string(&path).unwrap(), source);
+        let diagnostics = String::from_utf8(checked.stderr).unwrap();
+        assert!(diagnostics.contains("example.rs:3:1:"));
+        assert!(diagnostics.contains("example.rs:4:1:"));
+
+        let fixed = fixture.command().args(["--fix", "example.rs"]).output().unwrap();
+
+        assert!(fixed.status.success(), "{}", String::from_utf8_lossy(&fixed.stderr));
+        assert_eq!(fs::read_to_string(&path).unwrap(), expected);
+        assert!(fixture.command().args(["--check", "example.rs"]).status().unwrap().success());
+        assert!(fixture.command().args(["--fix", "example.rs"]).status().unwrap().success());
+        assert_eq!(fs::read_to_string(path).unwrap(), expected);
+    }
+
+    #[test]
     fn parse_failure_prevents_all_planned_writes() {
         let fixture = CargoFixture::new("exit 99");
         let source = "fn example() {\n    before();\n    match value {\n        _ => work(),\n    }\n}\n";
@@ -307,6 +338,9 @@ mod unix {
         let padded_path = fixture.directory.join("b_padded.rs");
         let padded_source = include_str!("fixtures/ollama_padded.txt");
         fs::write(&padded_path, padded_source).unwrap();
+        let grouping_path = fixture.directory.join("c_groups.rs");
+        let grouping_source = "fn example() {\n    let value = 1;\n    assert!(value > 0);\n}\n";
+        fs::write(&grouping_path, grouping_source).unwrap();
         fs::write(fixture.directory.join("z_invalid.rs"), "fn incomplete( {").unwrap();
         let output = fixture.command().arg("--fix").output().unwrap();
 
@@ -314,6 +348,7 @@ mod unix {
         assert!(String::from_utf8(output.stderr).unwrap().contains("z_invalid.rs"));
         assert_eq!(fs::read_to_string(path).unwrap(), source);
         assert_eq!(fs::read_to_string(padded_path).unwrap(), padded_source);
+        assert_eq!(fs::read_to_string(grouping_path).unwrap(), grouping_source);
     }
 
     #[test]

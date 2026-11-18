@@ -46,6 +46,8 @@ impl<'source> RustSource<'source> {
     /// Normalizes empty lines around multiline constructs and inside executable blocks.
     ///
     /// Sibling statements, items, and match arms are separated at safe boundaries.
+    /// Changes between binding, item, expression, and distinct macro-path groups
+    /// receive a blank line inside executable blocks.
     /// Executable blocks receive inner padding when their bodies contain multiple
     /// statements, a multiline declaration, or nested braces in a declaration.
     /// A lone expression or macro invocation stays compact even when multiline;
@@ -167,6 +169,57 @@ struct Construct {
     range: Range<usize>,
     /// Whether this construct requires separation from neighboring constructs.
     multiline: bool,
+}
+
+/// A full macro path whose parser-normalized spelling defines one visual group.
+#[derive(PartialEq, Eq)]
+struct MacroPath {
+    /// Rust path tokens, retaining qualification and raw identifiers while ignoring trivia.
+    spelling: String,
+}
+
+impl MacroPath {
+    /// Captures the identity of an already parsed macro path without resolving aliases.
+    fn new(path: &syn::Path) -> Self {
+        Self {
+            spelling: path.to_token_stream().to_string(),
+        }
+    }
+}
+
+/// Consecutive statements that share a visual purpose in one executable body.
+#[derive(PartialEq, Eq)]
+enum StatementGroup {
+    /// Local `let` bindings, independent of their initializer expressions.
+    Binding,
+    /// Local item declarations, including constants, statics, types, and functions.
+    Item,
+    /// Ordinary expressions, calls, control flow, and assignments.
+    Expression,
+    /// Standalone invocations of one full macro path.
+    Macro(MacroPath),
+}
+
+impl StatementGroup {
+    /// Classifies the containing statement without looking inside initializer or macro tokens.
+    fn for_statement(statement: &syn::Stmt) -> Self {
+        match statement {
+            syn::Stmt::Local(_) => Self::Binding,
+            syn::Stmt::Item(_) => Self::Item,
+            syn::Stmt::Expr(expression, _) => Self::for_expression(expression),
+            syn::Stmt::Macro(statement) => Self::Macro(MacroPath::new(&statement.mac.path)),
+        }
+    }
+
+    /// Recognizes plain, parenthesized, and tail macro expressions as the same macro group.
+    fn for_expression(expression: &syn::Expr) -> Self {
+        match expression {
+            syn::Expr::Macro(expression) => Self::Macro(MacroPath::new(&expression.mac.path)),
+            syn::Expr::Paren(expression) => Self::for_expression(&expression.expr),
+            syn::Expr::Group(expression) => Self::for_expression(&expression.expr),
+            _ => Self::Expression,
+        }
+    }
 }
 
 /// Collects disjoint, deduplicated padding edits without rewriting Rust tokens.
@@ -302,6 +355,29 @@ impl PaddingVisitor<'_> {
             }
         }
     }
+
+    /// Separates changes of statement group while keeping leading comments with the next group.
+    fn statement_groups(&mut self, statements: &[syn::Stmt]) {
+        let Some((first, remaining)) = statements.split_first() else {
+            return;
+        };
+        let mut previous = first;
+        let mut previous_group = StatementGroup::for_statement(first);
+
+        for next in remaining {
+            let next_group = StatementGroup::for_statement(next);
+            let gap = previous.span().byte_range().end + self.syntax_offset..next.span().byte_range().start + self.syntax_offset;
+
+            if previous_group != next_group
+                && let Some(offset) = missing_gap(self.source, gap)
+            {
+                self.insertions.insert(offset);
+            }
+
+            previous = next;
+            previous_group = next_group;
+        }
+    }
 }
 
 impl<'syntax> Visit<'syntax> for PaddingVisitor<'_> {
@@ -329,10 +405,11 @@ impl<'syntax> Visit<'syntax> for PaddingVisitor<'_> {
         visit::visit_file(self, node);
     }
 
-    /// Compacts single-expression body edges and checks neighboring statements.
+    /// Compacts single-expression body edges and pads neighboring constructs and statement groups.
     fn visit_block(&mut self, node: &'syntax syn::Block) {
         self.single_expression_body(node);
         self.sequence(&node.stmts);
+        self.statement_groups(&node.stmts);
         visit::visit_block(self, node);
     }
 

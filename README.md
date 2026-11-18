@@ -20,6 +20,8 @@ The block-padding rule gives multiline blocks the blank lines they need. `if`,
 from neighboring statements. Complex executable bodies also get blank lines
 inside their braces. A body containing just one expression stays compact, including
 a multiline call; any existing inner padding around it is removed.
+Statements are also grouped visually: bindings stay together, and a blank line
+separates different statement kinds or macro names.
 
 ## Install
 
@@ -123,6 +125,35 @@ are literal contents, comments, attributes, and LF/CRLF endings. Blank lines ins
 nested block comments or literals are never removed. Gaps containing opaque syntax
 such as inner attributes are left unchanged. `else` and `let … else` stay connected.
 Macro invocations are handled as complete units; their opaque bodies are not rewritten.
+
+## Visual statement groups
+
+Within an executable body, consecutive `let` bindings, local item declarations,
+ordinary expressions, and standalone macro invocations form separate groups.
+Each full macro path is its own group, so `assert_eq!` and `assert!` are separated:
+
+```rust
+fn check_icon() {
+    let index = find_index();
+    let icon = find_icon();
+
+    assert_eq!(icon.content_type, "image/png");
+    assert_eq!(icon.bytes, expected_bytes());
+
+    assert!(index.has_icon());
+    assert!(icon.is_local());
+}
+```
+
+Bindings use the containing `let` statement's group, including macro initializers.
+Ordinary calls share the expression group. Qualified macro paths retain their
+identity; aliases are not resolved. Existing blank lines and multiline block
+separation remain in effect, and leading comments and attributes stay attached
+to their statements. Statement order, literal contents, and opaque macro bodies
+are preserved. Function and method edges stay compact; multi-statement executable
+blocks retain their inner padding, and single-expression bodies stay unpadded.
+
+The same `--check` and `--fix` commands apply these groups automatically.
 
 Run `cargo fmt` first, then `cargo bclippy --fix`: rustfmt removes inner padding,
 so rerun bclippy after formatting. With no paths, the source rule scans the
