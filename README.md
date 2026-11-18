@@ -15,9 +15,11 @@ bclippy extends your Cargo and Clippy workflow with focused, automatically fixab
 source rules. It keeps using the Clippy installed for your selected Rust toolchain,
 so upstream improvements keep arriving with your Rust updates.
 
-The first rule gives multiline blocks the blank lines they need. `if`, `while`,
-`for`, `loop`, `match`, and other multiline block constructs are separated from
-neighboring statements while connected expressions and comments stay together.
+The block-padding rule gives multiline blocks the blank lines they need. `if`,
+`while`, `for`, `loop`, `match`, and other multiline block constructs are separated
+from neighboring statements. Complex executable bodies also get blank lines
+inside their braces, while tiny bodies, connected expressions, and comments stay
+together.
 
 ## Install
 
@@ -56,7 +58,10 @@ fn process() {
     prepare();
 
     while has_work() {
+
         process_next();
+        record_progress();
+
     }
 
     finish();
@@ -68,12 +73,42 @@ handles scopes, closures, `unsafe`, `async`, `const`, and struct literals. A blo
 inside an expression is padded around its containing statement, keeping function
 arguments and method chains compatible with rustfmt.
 
+Inside executable blocks, a body needs padding when it has multiple statements,
+a statement spanning multiple source lines, or nested brace syntax. This applies
+recursively to loops, conditionals, async blocks, closures, and other executable
+scopes. For example, the loop and async body below get padding while the tiny
+`if` body stays compact:
+
+```rust
+async fn wait() {
+    let response = tokio::time::timeout(Duration::from_secs(15), async {
+
+        loop {
+
+            if let Ok(response) = client.get(&address).send().await {
+                break response;
+            }
+
+            tokio::time::sleep(Duration::from_millis(20)).await;
+
+        }
+
+    })
+    .await;
+}
+```
+
+Function and method bodies keep their outer edges compact. Empty bodies,
+single-line blocks, struct fields, and declaration containers get no inner
+padding.
+
 Existing blank lines, literal contents, comments, attributes, and LF/CRLF endings
 are preserved. `else` and `let … else` stay connected. Macro invocations are handled
 as complete units; their opaque bodies are not rewritten.
 
-Run `cargo fmt` first, then `cargo bclippy --fix`. With no paths, the source rule
-scans the current directory recursively, excluding hidden directories, `target`,
+Run `cargo fmt` first, then `cargo bclippy --fix`: rustfmt removes inner padding,
+so rerun bclippy after formatting. With no paths, the source rule scans the
+current directory recursively, excluding hidden directories, `target`,
 `vendor`, `node_modules`, and symlinks. All selected files must parse before any
 fix is written. Invalid syntax and filesystem failures return an error.
 
@@ -86,8 +121,9 @@ After installing a reviewed bclippy revision in your workflow:
   run: cargo bclippy --check
 ```
 
-Keep your existing rustfmt and Clippy checks alongside it. Use `--fix` locally;
-CI only checks and reports file/line diagnostics.
+Keep your Clippy checks alongside it. When checking formatting, account for the
+formatter order: `cargo fmt --check` alone rejects the inner padding that bclippy
+adds. Use `--fix` locally; the check command only reports file/line diagnostics.
 
 ## Develop
 

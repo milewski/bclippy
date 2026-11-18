@@ -43,12 +43,13 @@ impl<'source> RustSource<'source> {
         })
     }
 
-    /// Inserts missing empty lines around multiline brace constructs with neighbors.
+    /// Inserts missing empty lines around multiline constructs and inside complex blocks.
     ///
-    /// Only boundaries between sibling statements, items, or match arms are edited.
-    /// Blocks within expressions are padded around the entire surrounding statement.
-    /// Connected syntax and macro bodies stay intact. Existing
-    /// empty lines, attached comments, and the local LF/CRLF convention are preserved.
+    /// Sibling statements, items, and match arms are separated at safe boundaries.
+    /// Executable blocks receive inner padding when their bodies contain multiple
+    /// statements, a multiline statement, or nested braces. Tiny one-line bodies
+    /// and function-body edges stay compact. Connected syntax and macro bodies
+    /// stay intact; comments, existing blank lines, and LF/CRLF endings are preserved.
     #[must_use]
     pub fn padded(&self) -> Padding {
         let mut visitor = PaddingVisitor {
@@ -119,6 +120,37 @@ struct PaddingVisitor<'source> {
 }
 
 impl PaddingVisitor<'_> {
+    /// Pads a complex executable body's edges without touching function-body edges.
+    fn block_body(&mut self, block: &syn::Block) {
+        let (Some(first), Some(last)) = (block.stmts.first(), block.stmts.last()) else {
+            return;
+        };
+
+        if block.brace_token.span.open().start().line == block.brace_token.span.close().end().line
+            || (block.stmts.len() == 1 && first.span().start().line == first.span().end().line && !has_braces(first.to_token_stream()))
+        {
+            return;
+        }
+
+        let opening = block.brace_token.span.open().byte_range().end + self.syntax_offset;
+        let first_start = first.span().byte_range().start + self.syntax_offset;
+
+        if let Some(offset) = missing_gap(self.source, opening..first_start) {
+            self.insertions.insert(offset);
+        }
+
+        let last_end = last.span().byte_range().end + self.syntax_offset;
+        let closing = block.brace_token.span.close().byte_range().start + self.syntax_offset;
+
+        if missing_gap(self.source, last_end..closing).is_some() {
+            let closing_line = self.source[..closing].rfind('\n').map_or(0, |offset| offset + 1);
+
+            if closing_line >= last_end && self.source[closing_line..closing].bytes().all(|byte| byte.is_ascii_whitespace()) {
+                self.insertions.insert(closing_line);
+            }
+        }
+    }
+
     /// Checks adjacent complete constructs, never the edges of their container.
     fn sequence<'syntax, Syntax: Spanned + ToTokens + 'syntax>(&mut self, nodes: impl IntoIterator<Item = &'syntax Syntax>) {
         let constructs: Vec<_> = nodes
@@ -147,6 +179,24 @@ impl PaddingVisitor<'_> {
 }
 
 impl<'syntax> Visit<'syntax> for PaddingVisitor<'_> {
+    /// Pads executable expression bodies while item functions retain compact edges.
+    fn visit_expr(&mut self, node: &'syntax syn::Expr) {
+        match node {
+            syn::Expr::Async(expression) => self.block_body(&expression.block),
+            syn::Expr::Block(expression) => self.block_body(&expression.block),
+            syn::Expr::Const(expression) => self.block_body(&expression.block),
+            syn::Expr::ForLoop(expression) => self.block_body(&expression.body),
+            syn::Expr::If(expression) => self.block_body(&expression.then_branch),
+            syn::Expr::Loop(expression) => self.block_body(&expression.body),
+            syn::Expr::TryBlock(expression) => self.block_body(&expression.block),
+            syn::Expr::Unsafe(expression) => self.block_body(&expression.block),
+            syn::Expr::While(expression) => self.block_body(&expression.body),
+            _ => {}
+        }
+
+        visit::visit_expr(self, node);
+    }
+
     /// Checks top-level items before recursively examining their bodies.
     fn visit_file(&mut self, node: &'syntax syn::File) {
         self.sequence(&node.items);
@@ -191,6 +241,14 @@ impl<'syntax> Visit<'syntax> for PaddingVisitor<'_> {
         self.sequence(&node.arms);
         visit::visit_expr_match(self, node);
     }
+}
+
+/// Detects nested brace syntax, including inline blocks inside opaque macro tokens.
+fn has_braces(tokens: TokenStream) -> bool {
+    tokens.into_iter().any(|token| match token {
+        TokenTree::Group(group) => group.delimiter() == Delimiter::Brace || has_braces(group.stream()),
+        _ => false,
+    })
 }
 
 /// Finds multiline brace groups using tokens, so braces in literals are ignored.

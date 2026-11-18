@@ -1,0 +1,11 @@
+async fn example() {
+    let response = tokio::time::timeout(Duration::from_secs(15), async {
+        loop {
+            if let Ok(response) = client.get(&address).send().await {
+                break response;
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+    })
+    .await;
+}

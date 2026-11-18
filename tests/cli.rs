@@ -251,6 +251,28 @@ mod unix {
     }
 
     #[test]
+    fn padding_cli_reports_and_fixes_nested_async_body_padding() {
+        let fixture = CargoFixture::new("exit 99");
+        let source = include_str!("fixtures/timeout_unpadded.txt");
+        let expected = include_str!("fixtures/timeout_padded.txt");
+        let path = fixture.directory.join("example.rs");
+        fs::write(&path, source).unwrap();
+        let output = fixture.command().args(["--check", "example.rs"]).output().unwrap();
+
+        assert_eq!(output.status.code(), Some(1));
+        assert_eq!(fs::read_to_string(&path).unwrap(), source);
+        assert!(String::from_utf8(output.stderr).unwrap().contains("inside a multiline block"));
+
+        let output = fixture.command().args(["--fix", "example.rs"]).output().unwrap();
+
+        assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+        assert_eq!(fs::read_to_string(&path).unwrap(), expected);
+        assert!(fixture.command().args(["--check", "example.rs"]).status().unwrap().success());
+        assert!(fixture.command().args(["--fix", "example.rs"]).status().unwrap().success());
+        assert_eq!(fs::read_to_string(path).unwrap(), expected);
+    }
+
+    #[test]
     fn parse_failure_prevents_all_planned_writes() {
         let fixture = CargoFixture::new("exit 99");
         let source = "fn example() {\n    before();\n    match value {\n        _ => work(),\n    }\n}\n";

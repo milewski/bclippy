@@ -52,5 +52,7 @@ jobs:
           cargo install --path . --locked --root target/install
           export PATH="$PWD/target/install/bin:$PATH"
           cargo bclippy --bclippy-version
+          # rustfmt above removes inner padding; verify fixes and idempotence here.
+          cargo bclippy --fix src tests
           cargo bclippy --check src tests
           cargo bclippy --workspace --all-targets --all-features --locked -- -D warnings

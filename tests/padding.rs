@@ -163,3 +163,23 @@ fn executable_shebang_and_bom_do_not_shift_insertion_positions() {
         assert_eq!(RustSource::parse(result.source()).unwrap().padded().lines(), []);
     }
 }
+
+#[test]
+fn inner_padding_preserves_trailing_nested_comment_contents() {
+    let source = "fn example() {\n    while ready { // body header\n        // explains the first step\n        begin();\n        finish(); /* trailing\n\n            /* nested */ comment */\n        // explains the final step\n    }\n}\n";
+    let expected = source
+        .replace("        // explains the first step", "\n        // explains the first step")
+        .replace("        // explains the final step\n", "        // explains the final step\n\n");
+
+    assert_eq!(padded(source), expected);
+}
+
+#[test]
+fn inline_nested_braces_make_an_otherwise_single_line_body_complex() {
+    let source = "fn example() {\n    for state in states {\n        assert_eq!(state, if completed { \"refused\" } else { \"pending\" });\n    }\n}\n";
+    let expected = source
+        .replace("        assert_eq!", "\n        assert_eq!")
+        .replace("    }\n", "\n    }\n");
+
+    assert_eq!(padded(source), expected);
+}
