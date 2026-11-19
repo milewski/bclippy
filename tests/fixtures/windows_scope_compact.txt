@@ -1,0 +1,19 @@
+impl Environment {
+    fn directories(&self) {
+        #[cfg(windows)]
+        {
+            directories.push(local_data.join("Programs/OpenAI/Codex/bin"));
+            directories.push(
+                self.values
+                    .get(std::ffi::OsStr::new("APPDATA"))
+                    .map_or_else(|| home.join("AppData/Roaming"), PathBuf::from)
+                    .join("npm"),
+            );
+            directories.push(local_data.join("Programs/nodejs"));
+
+            if let Some(program_files) = self.values.get(std::ffi::OsStr::new("PROGRAMFILES")) {
+                directories.push(PathBuf::from(program_files).join("nodejs"));
+            }
+        }
+    }
+}

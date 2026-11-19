@@ -58,7 +58,7 @@ fn complex_bodies_are_padded_across_executable_block_kinds() {
         "let result = async move {\n        first();\n        second().await\n    };",
         "let result = move || {\n        first();\n        second()\n    };",
         "let result = try {\n        first()?;\n        second()?\n    };",
-        "'scope: {\n        first();\n        break 'scope second();\n    }",
+        "let result = 'scope: {\n        first();\n        break 'scope second();\n    };",
         "let result = {\n        first();\n        second()\n    };",
     ] {
         let source = format!("fn example() {{\n    {block}\n}}\n");

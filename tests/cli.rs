@@ -330,6 +330,27 @@ mod unix {
     }
 
     #[test]
+    fn scoped_block_cli_removes_existing_padding_and_keeps_compact_scopes_clean() {
+        let fixture = CargoFixture::new("exit 99");
+        let source = include_str!("fixtures/windows_scope_padded.txt");
+        let expected = include_str!("fixtures/windows_scope_compact.txt");
+        let path = fixture.directory.join("example.rs");
+        fs::write(&path, source).unwrap();
+        let output = fixture.command().args(["--check", "example.rs"]).output().unwrap();
+
+        assert_eq!(output.status.code(), Some(1));
+        assert_eq!(fs::read_to_string(&path).unwrap(), source);
+
+        let output = fixture.command().args(["--fix", "example.rs"]).output().unwrap();
+
+        assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+        assert_eq!(fs::read_to_string(&path).unwrap(), expected);
+        assert!(fixture.command().args(["--check", "example.rs"]).status().unwrap().success());
+        assert!(fixture.command().args(["--fix", "example.rs"]).status().unwrap().success());
+        assert_eq!(fs::read_to_string(path).unwrap(), expected);
+    }
+
+    #[test]
     fn parse_failure_prevents_all_planned_writes() {
         let fixture = CargoFixture::new("exit 99");
         let source = "fn example() {\n    before();\n    match value {\n        _ => work(),\n    }\n}\n";

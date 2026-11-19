@@ -52,6 +52,8 @@ impl<'source> RustSource<'source> {
     /// statements, a multiline declaration, or nested braces in a declaration.
     /// A lone expression or macro invocation stays compact even when multiline;
     /// existing inner padding is removed. Function-body edges get no padding.
+    /// Standalone scoped block statements also keep compact edges regardless of
+    /// body complexity, while their contents retain normal padding rules.
     /// Connected syntax, comments, literals, attributes, macro contents, and LF/CRLF
     /// endings stay intact. Existing padding elsewhere is preserved.
     #[must_use]
@@ -107,7 +109,7 @@ pub struct Padding {
 
 /// An insertion or complete whitespace-only line removal in original source coordinates.
 ///
-/// Sibling gaps and body-edge gaps are disjoint. Single-expression bodies never
+/// Sibling gaps and body-edge gaps are disjoint. Compacted bodies never
 /// request inner insertions, and each set deduplicates edits before ordering them.
 enum PaddingEdit {
     /// Adds one line ending at a safe line start.
@@ -228,7 +230,7 @@ struct PaddingVisitor<'source> {
     source: &'source str,
     /// Safe line starts needing exactly one extra line ending.
     insertions: BTreeSet<usize>,
-    /// Complete empty lines removed only from single-expression body-edge gaps.
+    /// Complete empty lines removed only from compacted body-edge gaps.
     removals: BTreeSet<(usize, usize)>,
     /// Original prefix length omitted from the syntax parser's byte coordinates.
     syntax_offset: usize,
@@ -270,14 +272,22 @@ impl PaddingVisitor<'_> {
 
     /// Removes inner padding around a lone expression, including a trailing semicolon or macro invocation.
     fn single_expression_body(&mut self, block: &syn::Block) {
-        let [statement @ (syn::Stmt::Expr(..) | syn::Stmt::Macro(_))] = block.stmts.as_slice() else {
+        if matches!(block.stmts.as_slice(), [syn::Stmt::Expr(..) | syn::Stmt::Macro(_)]) {
+            self.compact_body_edges(block);
+        }
+    }
+
+    /// Removes body-edge padding while preserving gaps between statements and comment contents.
+    fn compact_body_edges(&mut self, block: &syn::Block) {
+        let opening = block.brace_token.span.open().byte_range().end + self.syntax_offset;
+        let closing = block.brace_token.span.close().byte_range().start + self.syntax_offset;
+        let (Some(first), Some(last)) = (block.stmts.first(), block.stmts.last()) else {
+            self.remove_empty_lines(opening..closing);
             return;
         };
-        let opening = block.brace_token.span.open().byte_range().end + self.syntax_offset;
-        let statement_range = statement.span().byte_range();
-        let closing = block.brace_token.span.close().byte_range().start + self.syntax_offset;
-        self.remove_empty_lines(opening..statement_range.start + self.syntax_offset);
-        self.remove_empty_lines(statement_range.end + self.syntax_offset..closing);
+
+        self.remove_empty_lines(opening..first.span().byte_range().start + self.syntax_offset);
+        self.remove_empty_lines(last.span().byte_range().end + self.syntax_offset..closing);
     }
 
     /// Removes complete empty lines in a whitespace/comment gap, preserving nested comment contents.
@@ -381,6 +391,16 @@ impl PaddingVisitor<'_> {
 }
 
 impl<'syntax> Visit<'syntax> for PaddingVisitor<'_> {
+    /// Keeps standalone scoped statements compact while recursively formatting their contents.
+    fn visit_stmt(&mut self, node: &'syntax syn::Stmt) {
+        if let syn::Stmt::Expr(syn::Expr::Block(expression), _) = node {
+            self.compact_body_edges(&expression.block);
+            visit::visit_expr_block(self, expression);
+        } else {
+            visit::visit_stmt(self, node);
+        }
+    }
+
     /// Pads executable expression bodies while item functions retain compact edges.
     fn visit_expr(&mut self, node: &'syntax syn::Expr) {
         match node {

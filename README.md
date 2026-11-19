@@ -20,6 +20,7 @@ The block-padding rule gives multiline blocks the blank lines they need. `if`,
 from neighboring statements. Complex executable bodies also get blank lines
 inside their braces. A body containing just one expression stays compact, including
 a multiline call; any existing inner padding around it is removed.
+Standalone scoped blocks also keep their edges compact, regardless of body size.
 Statements are also grouped visually: bindings stay together, and a blank line
 separates different statement kinds or macro names.
 
@@ -75,9 +76,9 @@ handles scopes, closures, `unsafe`, `async`, `const`, and struct literals. A blo
 inside an expression is padded around its containing statement, keeping function
 arguments and method chains compatible with rustfmt.
 
-Inside executable blocks, a body needs padding when it has multiple statements or
-a complex declaration. A single expression needs no inner padding, even if it
-spans multiple source lines or contains nested braces. Expression statements with
+Inside control-flow and value-producing blocks, a body needs padding when it has
+multiple statements or a complex declaration. A single expression needs no inner
+padding, even if it spans multiple source lines or contains nested braces. Expression statements with
 a semicolon and standalone macro invocations follow the same rule. The fixer
 removes existing empty lines at their body edges. A single multiline declaration
 such as `let result = process(...);` retains the declaration-padding rule.
@@ -116,12 +117,31 @@ fn configure() {
 }
 ```
 
-Function and method bodies keep their outer edges compact. Empty bodies,
-single-line blocks, struct fields, and declaration containers get no inner
-padding.
+Standalone scoped blocks, including `#[cfg(...)]` and labeled scopes, always keep
+their contents next to the braces; existing blank lines at those edges are removed.
+Their inner statements still get grouping and nested control-flow padding:
 
-Existing blank lines outside single-expression body-edge gaps are preserved, as
-are literal contents, comments, attributes, and LF/CRLF endings. Blank lines inside
+```rust
+fn configure() {
+    #[cfg(windows)]
+    {
+        directories.push(local_data.join("Programs/OpenAI/Codex/bin"));
+        directories.push(local_data.join("Programs/nodejs"));
+
+        if let Some(program_files) = program_files {
+            directories.push(PathBuf::from(program_files).join("nodejs"));
+        }
+    }
+}
+```
+
+Block-valued initializers, closure bodies, match arms, and `else` bodies retain
+the executable-body padding rule. Function and method bodies keep their outer
+edges compact. Empty bodies, single-line blocks, struct fields, and declaration
+containers get no inner padding.
+
+Existing blank lines outside single-expression and standalone-scope body-edge
+gaps are preserved, as are literal contents, comments, attributes, and LF/CRLF endings. Blank lines inside
 nested block comments or literals are never removed. Gaps containing opaque syntax
 such as inner attributes are left unchanged. `else` and `let … else` stay connected.
 Macro invocations are handled as complete units; their opaque bodies are not rewritten.
@@ -150,8 +170,9 @@ Ordinary calls share the expression group. Qualified macro paths retain their
 identity; aliases are not resolved. Existing blank lines and multiline block
 separation remain in effect, and leading comments and attributes stay attached
 to their statements. Statement order, literal contents, and opaque macro bodies
-are preserved. Function and method edges stay compact; multi-statement executable
-blocks retain their inner padding, and single-expression bodies stay unpadded.
+are preserved. Function and method edges stay compact. Multi-statement control-flow
+and value-producing blocks retain their inner padding. Standalone scopes and
+single-expression bodies stay unpadded.
 
 The same `--check` and `--fix` commands apply these groups automatically.
 
